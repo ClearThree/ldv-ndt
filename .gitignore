@@ -127,3 +127,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+/Modeset_24.unv
+/Scan24(defected_side_9mm).uff
+/Untitled.ipynb

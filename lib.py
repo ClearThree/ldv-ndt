@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 
 class Experiment:
-    def __init__(self, raw_file, modeset_file):
+    def __init__(self, raw_file, modeset_file, geometry=None):
         self.raw_data_file = pyuff.UFF(raw_file)
         self.mode_shapes_file = pyuff.UFF(modeset_file)
         self.raw_data = None
@@ -17,7 +17,10 @@ class Experiment:
         self.y_length = 0
         self.extract_data_blocks()
         self.extract_eigenfreqs()
-        self.extract_geometry()
+        if geometry:
+            self.extract_geometry(geometry)
+        else:
+            self.extract_geometry()
         self.construct_mode_shapes()
         print("Experimental data processed successfully.")
 
@@ -50,7 +53,11 @@ class Experiment:
                 eigenfreqs.append(float(test))
         self.eigenfreqs = eigenfreqs
 
-    def extract_geometry(self):
+    def extract_geometry(self, geometry=None):
+        if geometry:
+            self.x_length = geometry[0]
+            self.y_length = geometry[1]
+            return self.x_length, self.y_length
         data = self.mode_shapes_file.read_sets(2)
         y = data['y']
         i = 0
@@ -59,8 +66,18 @@ class Experiment:
         for each in y:
             if each - y_min < step:
                 i += 1
-        self.y_length = i-1
-        self.x_length = int(len(self.raw_data)/self.y_length)
+        length = len(self.raw_data)
+        print(i)
+        print(length)
+        if (length / i).is_integer():
+            self.y_length = i
+        elif (length / (i-1)).is_integer():
+            self.y_length = i-1
+        elif (length / (i+1)).is_integer():
+            self.y_length = i+1
+        else:
+            print('Error! Unable to detect geometry. Set geometry manually.')
+        self.x_length = int(length/self.y_length)
         return self.x_length, self.y_length
 
     def construct_mode_shapes(self):
@@ -78,39 +95,48 @@ class Experiment:
         self.mode_shapes = modeshapes
         self.average_values = average_values
 
-    def visualize_modeshape(self, frequency):
-        if not isinstance(frequency, list):
-            frequency = [frequency]
-        if max(frequency) < 150:
-            for each in frequency:
-                fig, ax = plt.subplots()
-                im = ax.imshow(np.rot90(np.abs(self.mode_shapes[list(self.mode_shapes.keys())[each]])), cmap='jet')
-                fig.colorbar(im)
-        else:
-            for each in frequency:
-                try:
-                    fig, ax = plt.subplots()
-                    im = ax.imshow(np.rot90(np.abs(self.mode_shapes[each])), cmap='jet')
-                    fig.colorbar(im)
-                except KeyError:
-                    print('No such eigenfrequency. Try another one.')
-                    print('Extracted eifgenfrequencies: ', list(self.mode_shapes.keys()))
-
-    def visualize_normalized_modeshape(self, frequency):
+    def visualize_modeshape(self, frequency, **kwargs):
         if not isinstance(frequency, list):
             frequency = [frequency]
         for each in frequency:
             if each < 150:
+                freq = list(self.mode_shapes.keys())[each]
                 fig, ax = plt.subplots()
-                im = ax.imshow(np.rot90(np.abs(self.mode_shapes[list(self.mode_shapes.keys())[each]]) /
-                                        self.average_values[each]), cmap='jet')
+                plt.set_cmap('jet')
+                im = ax.imshow(np.rot90(np.abs(self.mode_shapes[freq])), **kwargs)
                 fig.colorbar(im)
+                plt.title(f'Modeshape at frequency {freq} Hz')
             else:
                 try:
                     fig, ax = plt.subplots()
-                    im = ax.imshow(np.rot90(np.abs(self.mode_shapes[each])) /
-                                   self.average_values[self.find_index_from_frequency(each)], cmap='jet')
+                    plt.set_cmap('jet')
+                    im = ax.imshow(np.rot90(np.abs(self.mode_shapes[each])), **kwargs)
                     fig.colorbar(im)
+                    plt.title(f'Modeshape at frequency {each} Hz')
+                except KeyError:
+                    print('No such eigenfrequency. Try another one.')
+                    print('Extracted eifgenfrequencies: ', list(self.mode_shapes.keys()))
+
+    def visualize_normalized_modeshape(self, frequency, **kwargs):
+        if not isinstance(frequency, list):
+            frequency = [frequency]
+        for each in frequency:
+            if each < 150:
+                freq = list(self.mode_shapes.keys())[each]
+                fig, ax = plt.subplots()
+                plt.set_cmap('jet')
+                im = ax.imshow(np.rot90(np.abs(self.mode_shapes[freq]) /
+                                        self.average_values[each]), kwargs)
+                fig.colorbar(im)
+                plt.title(f'Modeshape at frequency {freq} Hz')
+            else:
+                try:
+                    fig, ax = plt.subplots()
+                    plt.set_cmap('jet')
+                    im = ax.imshow(np.rot90(np.abs(self.mode_shapes[each])) /
+                                   self.average_values[self.find_index_from_frequency(each)], kwargs)
+                    fig.colorbar(im)
+                    plt.title(f'Modeshape at frequency {each} Hz')
                 except KeyError:
                     print('No such eigenfrequency. Try another one.')
                     print('Extracted eifgenfrequencies: ', list(self.mode_shapes.keys()))
