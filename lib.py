@@ -11,6 +11,7 @@ class Experiment:
         self.raw_data = None
         self.exp_freqs = []
         self.eigenfreqs = []
+        self.dbrs = {}
         self.mode_shapes = None
         self.average_values = np.empty(0)
         self.x_length = 0
@@ -22,6 +23,7 @@ class Experiment:
         else:
             self.extract_geometry()
         self.construct_mode_shapes()
+        self.DBRs = {}
         print("Experimental data processed successfully.")
 
     def extract_data_blocks(self):
@@ -140,6 +142,48 @@ class Experiment:
                 except KeyError:
                     print('No such eigenfrequency. Try another one.')
                     print('Extracted eifgenfrequencies: ', list(self.mode_shapes.keys()))
+
+    def calculate_dbrs(self, coords):
+        dbrs = np.empty(0)
+        total_area = self.x_length*self.y_length
+        defected_area = (coords[1][0]-coords[0][0]) * (coords[2][1]-coords[0][1])
+        for freq, mode_shape in self.mode_shapes.items():
+            defected_region_magnitudes = 0
+            intact_region_magnitudes = 0
+            for y in range(coords[0][1], coords[2][1]):
+                for x in range(coords[0][0], coords[1][0]):
+                    defected_region_magnitudes += np.abs(mode_shape[x][y])
+                    intact_region_magnitudes = np.sum(np.abs(mode_shape)) - defected_region_magnitudes
+            dbrs = np.append(dbrs, defected_region_magnitudes * (total_area - defected_area) /
+                             (intact_region_magnitudes * defected_area))
+        coords_str = ''
+        for i in coords:
+            coords_str += str(i) + ' '
+        self.DBRs[coords_str] = dbrs
+        plt.plot(dbrs)
+        return dbrs
+
+    def move_and_calculate_dbr_window(self, size, step):
+        if isinstance(step, tuple):
+            step_x = step[0]
+            step_y = step[1]
+        elif isinstance(step, int):
+            step_x = step_y = step
+        else:
+            raise ValueError("Error! Step was filled incorrectly.")
+        dbrs = np.empty((0, len(self.mode_shapes)))
+        if size[0] >= self.x_length:
+            raise ValueError("Error! The requested window x-size is greater than the experimental geometry.")
+        if size[1] >= self.y_length:
+            raise ValueError("Error! The requested window y-size is greater than the experimental geometry.")
+        for y in range(0, self.x_length - size[1]-1, step_x):
+            for x in range(0, self.y_length - size[0]-1, step_y):
+                print("Calculating DBR for coordinates ",
+                      [(x, y), (x+size[0], y), (x, y+size[1]), (x+size[0], y+size[1])])
+                dbrs = np.append(dbrs,
+                                 [self.calculate_dbrs([(x, y), (x+size[0], y), (x, y+size[1]), (x+size[0], y+size[1])])],
+                                 axis=0)
+        return dbrs
 
     def find_index_from_frequency(self, frequency):
         return np.searchsorted(self.eigenfreqs, frequency)
