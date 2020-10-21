@@ -2,6 +2,7 @@ import numpy as np
 import pyuff
 import pandas as pd
 import matplotlib.pyplot as plt
+from scipy.interpolate import griddata
 
 
 class Experiment:
@@ -21,6 +22,8 @@ class Experiment:
         self.dbrs = {}
         self.mode_shapes = None
         self.average_values = np.empty(0)
+        self.xs = []
+        self.ys = []
         self.x_length = 0
         self.y_length = 0
         self.extract_data_blocks()
@@ -81,11 +84,12 @@ class Experiment:
             self.y_length = geometry[1]
             return self.x_length, self.y_length
         data = self.mode_shapes_file.read_sets(2)
-        y = data['y']
+        self.xs = data['x']
+        self.ys = data['y']
         i = 0
-        step = max(y[0], y[1]) - min(y[0], y[1])
-        y_min = min(y)
-        for each in y:
+        step = max(self.ys[0], self.ys[1]) - min(self.ys[0], self.ys[1])
+        y_min = min(self.ys)
+        for each in self.ys:
             if each - y_min < step:
                 i += 1
         length = len(self.raw_data)
@@ -100,6 +104,7 @@ class Experiment:
         else:
             print('Error! Unable to detect geometry. Set geometry manually.')
         self.x_length = int(length/self.y_length)
+        print(f"Detected geometry: {self.x_length}x{self.y_length} points")
         return self.x_length, self.y_length
 
     def construct_mode_shapes(self):
@@ -120,6 +125,17 @@ class Experiment:
             modeshapes[int(np.around(self.exp_freqs[index]))] = modeshape
         self.mode_shapes = modeshapes
         self.average_values = average_values
+
+    def stack_modeshapes(self):
+        """
+        Stacks mode shapes into one 2D-array
+        :return: numpy array, 2D-array with mode shapes, where rows are mode shapes and number of rows is equal to the
+        number of mode shapes.
+        """
+        modeset = np.empty((0, self.x_length*self.y_length))
+        for key, value in self.mode_shapes.items():
+            modeset = np.append(modeset, [np.abs(value).reshape(-1)], axis=0)
+        return modeset
 
     def visualize_modeshape(self, frequency, **kwargs):
         """
@@ -210,6 +226,19 @@ class Experiment:
                                  axis=0)
         return dbrs
 
+    def interpolate_one_modeset(self, grid_x, grid_y, method='nearest'):
+        print("Started interpolation")
+        zs_interpolated = np.zeros((0, grid_x.shape[0] * grid_x.shape[1]))
+        for each in range(len(self.mode_shapes)):
+            #  mirroring option
+            # interpolation = np.flip(griddata((x_coors, y_coors), values[each], (grid_x, grid_y), method=method)
+            # , axis=(0,1)).reshape(-1)
+            interpolation = griddata((self.xs, self.ys), self.mode_shapes[each], (grid_x, grid_y), method=method).\
+                reshape(-1)
+            zs_interpolated = np.append(zs_interpolated, [interpolation], axis=0)
+        print("Interpolation complete")
+        return zs_interpolated
+
     def find_index_from_frequency(self, frequency):
         """
         Performs binary search to find an index of the given frequency.
@@ -252,3 +281,17 @@ class Experiment:
         :return: list, list with eigenfrequencies.
         """
         return self.eigenfreqs
+
+
+def MAC(matrix1, matrix2):
+    if matrix1.shape[0] > matrix2.shape[0]:
+        shape = matrix2.shape[0]
+    else:
+        shape = matrix1.shape[0]
+    res = np.zeros((shape, shape))
+    for i in range(shape):
+        for j in range(shape):
+            res[i][j] = (np.dot(matrix1[i].T, matrix2[j]) ** 2) / (
+                    np.dot(matrix1[i].T, matrix1[i]) * np.dot(matrix2[j].T,
+                                                              matrix2[j]))
+    return res
