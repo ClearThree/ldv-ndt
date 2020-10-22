@@ -134,7 +134,18 @@ class Experiment:
         """
         modeset = np.empty((0, self.x_length*self.y_length))
         for key, value in self.mode_shapes.items():
-            modeset = np.append(modeset, [np.abs(value).reshape(-1)], axis=0)
+            modeset = np.append(modeset, [value.reshape(-1)], axis=0)
+        return modeset
+
+    def stack_and_flip_modeshapes(self):
+        """
+        Stacks mode shapes into one 2D-array
+        :return: numpy array, 2D-array with mode shapes, where rows are mode shapes and number of rows is equal to the
+        number of mode shapes.
+        """
+        modeset = np.empty((0, self.x_length*self.y_length))
+        for key, value in self.mode_shapes.items():
+            modeset = np.append(modeset, np.flip([value.reshape(-1)], axis=1), axis=0)
         return modeset
 
     def visualize_modeshape(self, frequency, **kwargs):
@@ -283,15 +294,43 @@ class Experiment:
         return self.eigenfreqs
 
 
-def MAC(matrix1, matrix2):
-    if matrix1.shape[0] > matrix2.shape[0]:
-        shape = matrix2.shape[0]
+def mac(modeset1, modeset2):
+    """
+    Calculates MAC matrix for the given sets of real modal vectors. Applicable only for float values.
+    :param modeset1: 2D numpy array of floats, set of modal vectors of the first experiment, rows are modal vectors.
+    :param modeset2: 2D numpy array of floats, set of modal vectors of the first experiment, rows are modal vectors.
+    :return: 2D numpy array of floats, MAC matrix.
+    """
+    if isinstance(modeset1[0][0], np.complex) or isinstance(modeset2[0][0], np.complex):
+        raise ValueError('One of modesets is complex. Use function complex_mac instead!')
+    if modeset1.shape[0] > modeset2.shape[0]:
+        shape = modeset2.shape[0]
     else:
-        shape = matrix1.shape[0]
+        shape = modeset1.shape[0]
     res = np.zeros((shape, shape))
     for i in range(shape):
         for j in range(shape):
-            res[i][j] = (np.dot(matrix1[i].T, matrix2[j]) ** 2) / (
-                    np.dot(matrix1[i].T, matrix1[i]) * np.dot(matrix2[j].T,
-                                                              matrix2[j]))
+            res[i][j] = (np.abs(np.dot(modeset1[i].T, modeset2[j])) ** 2) / (
+                    np.dot(modeset1[i].T, modeset1[i]) * np.dot(modeset2[j].T, modeset2[j]))
+    return res
+
+
+def complex_mac(modeset1, modeset2):
+    """
+    Calculates MAC matrix for the given sets of complex modal vectors. Applicable only for complex values.
+    :param modeset1: 2D numpy array of floats, set of modal vectors of the first experiment, rows are modal vectors.
+    :param modeset2: 2D numpy array of floats, set of modal vectors of the first experiment, rows are modal vectors.
+    :return: 2D numpy array of floats, MAC matrix.
+    """
+    if isinstance(modeset1[0][0], np.float32) or isinstance(modeset2[0][0], np.float32):
+        raise ValueError('One of modesets is not complex. Use function mac instead!')
+    if modeset1.shape[0] > modeset2.shape[0]:
+        shape = modeset2.shape[0]
+    else:
+        shape = modeset1.shape[0]
+    res = np.zeros((shape, shape))
+    for i in range(shape):
+        for j in range(shape):
+            res[i][j] = (np.abs(np.vdot(modeset2[j], modeset1[i].T)) ** 2) / np.real(
+                    np.vdot(modeset1[i].T, modeset1[i]) * np.vdot(modeset2[j].T, modeset2[j]))
     return res
