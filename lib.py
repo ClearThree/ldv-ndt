@@ -97,13 +97,13 @@ class Experiment:
         print(length)
         if (length / i).is_integer():
             self.y_length = i
-        elif (length / (i-1)).is_integer():
-            self.y_length = i-1
-        elif (length / (i+1)).is_integer():
-            self.y_length = i+1
+        elif (length / (i - 1)).is_integer():
+            self.y_length = i - 1
+        elif (length / (i + 1)).is_integer():
+            self.y_length = i + 1
         else:
             print('Error! Unable to detect geometry. Set geometry manually.')
-        self.x_length = int(length/self.y_length)
+        self.x_length = int(length / self.y_length)
         print(f"Detected geometry: {self.x_length}x{self.y_length} points")
         return self.x_length, self.y_length
 
@@ -126,29 +126,31 @@ class Experiment:
         self.mode_shapes = modeshapes
         self.average_values = average_values
 
-    def stack_modeshapes(self):
+    def stack_modeshapes(self, dims: int = 2, flip: bool = False) -> np.array:
         """
-        Stacks mode shapes into one 2D-array
-        :return: numpy array, 2D-array with mode shapes, where rows are mode shapes and number of rows is equal to the
-        number of mode shapes.
+        Stacks mode shapes into one 2D-array or 3D-array.
+        :param dims: int, specifies the dimensions for output array. Another words, specifies if the mode shapes should
+        be represented as vector or as matrix.
+        :param flip: bool, specifies if the mode shapes should be flipped along the horizontal axis.
+        :return: np.array, 2D or 3D-array with mode shapes, where mode shapes are along axis 0 either as vector or as
+        matrix.
         """
-        modeset = np.empty((0, self.x_length*self.y_length))
+        if dims == 2:
+            modeset = np.empty((0, self.y_length * self.x_length))
+        elif dims == 3:
+            modeset = np.empty((0, self.y_length, self.x_length))
+        else:
+            raise ValueError('The given number of axes is not correct. Dims = 2 (with flattened modal vectors) or '
+                             'dims = 3 (with modal shapes of experimental grid dimensions) should be used.')
         for key, value in self.mode_shapes.items():
-            modeset = np.append(modeset, [value.reshape(-1)], axis=0)
+            if not flip:
+                modeset = np.append(modeset, [value.reshape(-1) if dims == 2 else value], axis=0)
+            else:
+                modeset = np.append(modeset, [np.flip(value, axis=1).reshape(-1) if dims == 2 else
+                                              np.flip(value, axis=1)], axis=0)
         return modeset
 
-    def stack_and_flip_modeshapes(self):
-        """
-        Stacks mode shapes into one 2D-array
-        :return: numpy array, 2D-array with mode shapes, where rows are mode shapes and number of rows is equal to the
-        number of mode shapes.
-        """
-        modeset = np.empty((0, self.x_length*self.y_length))
-        for key, value in self.mode_shapes.items():
-            modeset = np.append(modeset, np.flip([value.reshape(-1)], axis=1), axis=0)
-        return modeset
-
-    def visualize_modeshape(self, frequency, **kwargs):
+    def visualize_modeshape(self, frequency: int, **kwargs):
         """
         Visualizes mode shape, either specified with frequency, or with number.
         :param frequency: int, frequency or number of mode (if the given number is less than 150, it will be interpreted
@@ -185,8 +187,8 @@ class Experiment:
         :return: np.array, array with dbr values. One value for each modeshape.
         """
         dbrs = np.empty(0)
-        total_area = self.x_length*self.y_length
-        defected_area = (coords[1][0]-coords[0][0]) * (coords[2][1]-coords[0][1])
+        total_area = self.x_length * self.y_length
+        defected_area = (coords[1][0] - coords[0][0]) * (coords[2][1] - coords[0][1])
         for freq, mode_shape in self.mode_shapes.items():
             defected_region_magnitudes = 0
             intact_region_magnitudes = 0
@@ -228,13 +230,13 @@ class Experiment:
             raise ValueError("Error! The requested window x-size is greater than the experimental geometry.")
         if size[1] >= self.y_length:
             raise ValueError("Error! The requested window y-size is greater than the experimental geometry.")
-        for y in range(0, self.x_length - size[1]-1, step_x):
-            for x in range(0, self.y_length - size[0]-1, step_y):
+        for y in range(0, self.x_length - size[1] - 1, step_x):
+            for x in range(0, self.y_length - size[0] - 1, step_y):
                 print("Calculating DBR for coordinates ",
-                      [(x, y), (x+size[0], y), (x, y+size[1]), (x+size[0], y+size[1])])
+                      [(x, y), (x + size[0], y), (x, y + size[1]), (x + size[0], y + size[1])])
                 dbrs = np.append(dbrs,
-                                 [self.calculate_dbrs([(x, y), (x+size[0], y), (x, y+size[1]), (x+size[0], y+size[1])])],
-                                 axis=0)
+                                 [self.calculate_dbrs([(x, y), (x + size[0], y),
+                                                       (x, y + size[1]), (x + size[0], y + size[1])])], axis=0)
         return dbrs
 
     def interpolate_one_modeset(self, grid_x, grid_y, method='nearest'):
@@ -244,7 +246,7 @@ class Experiment:
             #  mirroring option
             # interpolation = np.flip(griddata((x_coors, y_coors), values[each], (grid_x, grid_y), method=method)
             # , axis=(0,1)).reshape(-1)
-            interpolation = griddata((self.xs, self.ys), self.mode_shapes[each], (grid_x, grid_y), method=method).\
+            interpolation = griddata((self.xs, self.ys), self.mode_shapes[each], (grid_x, grid_y), method=method). \
                 reshape(-1)
             zs_interpolated = np.append(zs_interpolated, [interpolation], axis=0)
         print("Interpolation complete")
@@ -266,16 +268,16 @@ class Experiment:
         eigenfreqs_indices = np.empty(0, dtype=np.int32)
         for each in self.eigenfreqs:
             ind = np.searchsorted(self.exp_freqs, each)
-            if abs(self.exp_freqs[ind]-each) < abs(self.exp_freqs[ind-1]-each):
+            if abs(self.exp_freqs[ind] - each) < abs(self.exp_freqs[ind - 1] - each):
                 eigenfreqs_indices = np.append(eigenfreqs_indices, ind)
             else:
-                eigenfreqs_indices = np.append(eigenfreqs_indices, ind-1)
+                eigenfreqs_indices = np.append(eigenfreqs_indices, ind - 1)
         return eigenfreqs_indices
 
     def get_raw_data(self):
         """
-        Gives an access for the raw_data UFF object.
-        :return: obj, pyuff.UFF object with raw experimental data.
+        Gives an access for the raw experimental FRFs.
+        :return: 2D numpy array, with FRFs on all measured frequencies.
         """
         return self.raw_data
 
@@ -294,11 +296,12 @@ class Experiment:
         return self.eigenfreqs
 
 
-def mac(modeset1, modeset2):
+def mac(modeset1, modeset2, title: str = None):
     """
     Calculates MAC matrix for the given sets of real modal vectors. Applicable only for float values.
     :param modeset1: 2D numpy array of floats, set of modal vectors of the first experiment, rows are modal vectors.
     :param modeset2: 2D numpy array of floats, set of modal vectors of the first experiment, rows are modal vectors.
+    :param title: str, title for plot with MAC.
     :return: 2D numpy array of floats, MAC matrix.
     """
     if isinstance(modeset1[0][0], np.complex) or isinstance(modeset2[0][0], np.complex):
@@ -310,16 +313,25 @@ def mac(modeset1, modeset2):
     res = np.zeros((shape, shape))
     for i in range(shape):
         for j in range(shape):
-            res[i][j] = (np.abs(np.dot(modeset1[i].T, modeset2[j])) ** 2) / (
-                    np.dot(modeset1[i].T, modeset1[i]) * np.dot(modeset2[j].T, modeset2[j]))
+            res[i][j] = (np.abs(np.dot(modeset1[i].T, modeset2[j])) ** 2) / \
+                        (np.dot(modeset1[i].T, modeset1[i]) * np.dot(modeset2[j].T, modeset2[j]))
+    fig, ax = plt.subplots()
+    plt.set_cmap('jet')
+    im = ax.imshow(res, vmin=0, vmax=1)
+    plt.colorbar(im)
+    plt.gca().invert_yaxis()
+    if title:
+        plt.title(title)
     return res
 
 
-def complex_mac(modeset1, modeset2):
+def complex_mac(modeset1: np.array, modeset2: np.array, region: list = None, title: str = None) -> np.array:
     """
     Calculates MAC matrix for the given sets of complex modal vectors. Applicable only for complex values.
     :param modeset1: 2D numpy array of floats, set of modal vectors of the first experiment, rows are modal vectors.
     :param modeset2: 2D numpy array of floats, set of modal vectors of the first experiment, rows are modal vectors.
+    :param region: list, a list of tuples (coordinates of the rectangle for which the MAC is performed)
+    :param title: str, title for plot with MAC.
     :return: 2D numpy array of floats, MAC matrix.
     """
     if isinstance(modeset1[0][0], np.float32) or isinstance(modeset2[0][0], np.float32):
@@ -332,5 +344,49 @@ def complex_mac(modeset1, modeset2):
     for i in range(shape):
         for j in range(shape):
             res[i][j] = (np.abs(np.vdot(modeset2[j], modeset1[i].T)) ** 2) / np.real(
-                    np.vdot(modeset1[i].T, modeset1[i]) * np.vdot(modeset2[j].T, modeset2[j]))
+                np.vdot(modeset1[i].T, modeset1[i]) * np.vdot(modeset2[j].T, modeset2[j]))
+    fig, ax = plt.subplots()
+    plt.set_cmap('jet')
+    im = ax.imshow(res)
+    plt.colorbar(im)
+    plt.gca().invert_yaxis()
+    if title:
+        plt.title(title)
     return res
+
+
+def slide_grid_and_calculate_mac(modeset1: np.array, modeset2: np.array, direction: tuple,
+                                 title: str = None, mac_is_complex: bool = True) -> np.array:
+    """
+    :param modeset1: 3D numpy array of floats, set of modal vectors of the first experiment, rows are modal vectors.
+    :param modeset2: 3D numpy array of floats, set of modal vectors of the first experiment, rows are modal vectors.
+    :param direction: tuple, specifying how to move one matrix. First value for x axis, second for y.
+    :param mac_is_complex: bool, if True - uses the complex_mac function to calculate MAC matrix. Otherwise - uses mac
+    function for abs amplitudes comparison.
+    :param title: title for MAC plot.
+    :return: 2D numpy array of floats, MAC matrix.
+    """
+    if modeset1.ndim == 2 or modeset2.ndim == 2:
+        raise ValueError("Error! The given modesets must be 3D arrays (mode shapes must be represented as matrices)")
+    if direction[1] == 0 and direction[0] == 0:
+        modeset1_slided = modeset1[:, :, :]
+        modeset2_slided = modeset2[:, :, :]
+    elif direction[0] == 0:
+        modeset1_slided = modeset1[:, :, direction[1]:]
+        modeset2_slided = modeset2[:, :, :-direction[1]]
+    elif direction[1] == 0:
+        modeset1_slided = modeset1[:, :-direction[0], :]
+        modeset2_slided = modeset2[:, direction[0]:, :]
+    else:
+        modeset1_slided = modeset1[:, :-direction[0], direction[1]:]
+        modeset2_slided = modeset2[:, direction[0]:, :-direction[1]]
+    shape1 = modeset1_slided.shape
+    shape2 = modeset2_slided.shape
+    if mac_is_complex:
+        return complex_mac(
+            modeset1_slided.reshape((shape1[0], shape1[1]*shape1[2])),
+            modeset2_slided.reshape((shape2[0], shape2[1]*shape2[2])), title=title)
+    else:
+        return mac(
+            np.abs(modeset1_slided.reshape((shape1[0], shape1[1] * shape1[2]))),
+            np.abs(modeset2_slided.reshape((shape2[0], shape2[1] * shape2[2]))), title=title)
