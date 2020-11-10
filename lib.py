@@ -3,6 +3,8 @@ import pyuff
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.interpolate import griddata
+from scipy.optimize import curve_fit
+from tqdm import tqdm
 
 
 class Experiment:
@@ -14,26 +16,31 @@ class Experiment:
         :param modeset_file: str,  Path to Simcenter Testlab .unv mode shape file.
         :param geometry: tuple of ints, dimensions of the experimental grid (optional).
         """
-        self.raw_data_file = pyuff.UFF(raw_file)
-        self.mode_shapes_file = pyuff.UFF(modeset_file)
-        self.raw_data = None
-        self.exp_freqs = []
-        self.eigenfreqs = []
-        self.dbrs = {}
-        self.mode_shapes = None
-        self.average_values = np.empty(0)
-        self.xs = []
-        self.ys = []
-        self.x_length = 0
-        self.y_length = 0
+        print('Reading experimental and mode set files...')
+        self.raw_data_file: pyuff.UFF = pyuff.UFF(raw_file)
+        self.mode_shapes_file: pyuff.UFF = pyuff.UFF(modeset_file)
+        print('Files have been read.')
+        self.raw_data: np.array = None
+        self.velocities: np.array = None
+        self.exp_freqs: list = []
+        self.eigenfreqs: list = []
+        self.DBRs: dict = {}
+        self.mode_shapes: np.array = None
+        self.xs: list = []
+        self.ys: list = []
+        self.rs: np.array = None
+        self.x_length: int = 0
+        self.y_length: int = 0
         self.extract_data_blocks()
         self.extract_eigenfreqs()
+        self.coeffs: np.array = None
+        self.WDs: np.array = None
+        self.WBP: np.array = None
         if geometry:
             self.extract_geometry(geometry)
         else:
             self.extract_geometry()
         self.construct_mode_shapes()
-        self.DBRs = {}
         print("Experimental data processed successfully.")
 
     def extract_data_blocks(self):
@@ -43,13 +50,18 @@ class Experiment:
         """
         print('Extracting experimental data...')
         indices = []
-        for i, each in enumerate(self.raw_data_file.get_set_types()):
+        set_types = self.raw_data_file.get_set_types()
+        pbar = tqdm(total=len(set_types))
+        for i, each in enumerate(set_types):
+            pbar.update(1)
             if each == 58:
                 indices.append(i)
+        pbar.close()
         data = self.raw_data_file.read_sets(indices)
         df = pd.DataFrame(data)
         self.exp_freqs = data[0]['x']
-        self.raw_data = df['data']
+        self.raw_data = np.stack(df[df['id1'] == 'Transfer Function H1']['data'].to_numpy())
+        self.velocities = np.stack(df[df['id1'] == 'Response Linear Spectrum']['data'].to_numpy())
 
     def extract_eigenfreqs(self):
         """
@@ -58,9 +70,13 @@ class Experiment:
         """
         print('Extracting mode shapes data...')
         indices = []
-        for i, each in enumerate(self.mode_shapes_file.get_set_types()):
+        set_types = self.mode_shapes_file.get_set_types()
+        pbar = tqdm(total=len(set_types))
+        for i, each in enumerate(set_types):
             if each == 55:
                 indices.append(i)
+            pbar.update(1)
+        pbar.close()
         data = self.mode_shapes_file.read_sets(indices)
         eigenfreqs = []
         for each in data:
@@ -73,11 +89,11 @@ class Experiment:
                 eigenfreqs.append(float(test))
         self.eigenfreqs = eigenfreqs
 
-    def extract_geometry(self, geometry=None):
+    def extract_geometry(self, geometry: tuple = None) -> tuple:
         """
         Extracts (tries to) dimensions of experimental grid from raw .uff file.
         :param geometry: (optional) tuple of ints, for the specification of dimensions if the extraction is unsuccessful
-        :return: int, int, width and height of the experimental grid (lengths of x and y axes of rectangular grid).
+        :return: tuple of ints, width and height of the experimental grid (lengths of x and y axes of rectangular grid).
         """
         if geometry:
             self.x_length = geometry[0]
@@ -92,9 +108,7 @@ class Experiment:
         for each in self.ys:
             if each - y_min < step:
                 i += 1
-        length = len(self.raw_data)
-        print(i)
-        print(length)
+        length = len(self.xs)
         if (length / i).is_integer():
             self.y_length = i
         elif (length / (i - 1)).is_integer():
@@ -114,17 +128,14 @@ class Experiment:
         """
         print('Constructing mode shapes...')
         modeshapes = {}
-        average_values = np.empty(0)
         work_freq_indices = self.associate_frequencies()
         for index in work_freq_indices:
             modeshape = np.empty(0)
             for point in self.raw_data:
                 modeshape = np.append(modeshape, point[index])
-            average_values = np.append(average_values, np.average(np.abs(modeshape)))
             modeshape = modeshape.reshape(self.y_length, self.x_length)
             modeshapes[int(np.around(self.exp_freqs[index]))] = modeshape
         self.mode_shapes = modeshapes
-        self.average_values = average_values
 
     def stack_modeshapes(self, dims: int = 2, flip: bool = False) -> np.array:
         """
@@ -161,17 +172,16 @@ class Experiment:
         if not isinstance(frequency, list):
             frequency = [frequency]
         for each in frequency:
+            fig, ax = plt.subplots()
+            plt.set_cmap('jet')
             if each < 150:
                 freq = list(self.mode_shapes.keys())[each]
-                fig, ax = plt.subplots()
-                plt.set_cmap('jet')
                 im = ax.imshow(np.rot90(np.abs(self.mode_shapes[freq])), **kwargs)
                 fig.colorbar(im)
                 plt.title(f'Modeshape at frequency {freq} Hz')
             else:
                 try:
-                    fig, ax = plt.subplots()
-                    plt.set_cmap('jet')
+
                     im = ax.imshow(np.rot90(np.abs(self.mode_shapes[each])), **kwargs)
                     fig.colorbar(im)
                     plt.title(f'Modeshape at frequency {each} Hz')
@@ -243,9 +253,6 @@ class Experiment:
         print("Started interpolation")
         zs_interpolated = np.zeros((0, grid_x.shape[0] * grid_x.shape[1]))
         for each in range(len(self.mode_shapes)):
-            #  mirroring option
-            # interpolation = np.flip(griddata((x_coors, y_coors), values[each], (grid_x, grid_y), method=method)
-            # , axis=(0,1)).reshape(-1)
             interpolation = griddata((self.xs, self.ys), self.mode_shapes[each], (grid_x, grid_y), method=method). \
                 reshape(-1)
             zs_interpolated = np.append(zs_interpolated, [interpolation], axis=0)
@@ -281,6 +288,13 @@ class Experiment:
         """
         return self.raw_data
 
+    def get_velocities(self):
+        """
+        Gives an access for the raw experimental velocities.
+        :return: 2D numpy array, with FRFs on all measured frequencies.
+        """
+        return self.velocities
+
     def get_exp_freqs(self):
         """
         Gives access for the experimental frequencies.
@@ -294,6 +308,55 @@ class Experiment:
         :return: list, list with eigenfrequencies.
         """
         return self.eigenfreqs
+
+    def fit_curves(self, pzt_location: tuple) -> np.array:
+        """
+        Calculates the WD functions for each spectral line available.
+        :param pzt_location: tuple of ints, coordinates of PZT location.
+        :return: 2D-np.array, the array with exponential decay function coefficients for each spectral line
+        """
+        pzt_x, pzt_y = pzt_location
+        coeffs = np.empty((0, 3))
+        rs = np.empty(0)
+        wds = np.empty((0, self.velocities.shape[0]))
+        for point_number in range(len(self.velocities)):
+            x = int(point_number/self.x_length)
+            y = self.x_length - (point_number - int(x*self.x_length))
+            r = np.sqrt((x-pzt_x)**2 + (y-pzt_y)**2)
+            rs = np.append(rs, r)
+        self.rs = rs
+        init_popt, _ = curve_fit(exponential_decay, rs, np.abs(self.velocities.T[int(self.velocities.T.shape[0]/2)])**2,
+                                 maxfev=5000)
+        for each in tqdm(self.velocities.T):
+            popt, _ = curve_fit(exponential_decay, rs, np.abs(each)**2, p0=init_popt, maxfev=5000)
+            coeffs = np.append(coeffs, [popt], axis=0)
+            wd_temp = exponential_decay(rs, popt[0], popt[1], popt[2])
+            wds = np.append(wds, [wd_temp], axis=0)
+        self.coeffs = coeffs
+        self.WDs = wds
+        return coeffs, wds
+
+    def calculate_wbp(self, **kwargs) -> np.array:
+        """
+        This function calculates and visualizes Weighted Band Power (WBP) of the given experiment.
+        :return: 2D np.array with WBP of experiment.
+        """
+        WBP = np.zeros(self.raw_data.shape[0])
+        for number, each in enumerate(self.raw_data.T):
+            WBP += np.abs(each)**2/self.WDs[number]
+        fig, ax = plt.subplots()
+        plt.set_cmap('jet')
+        im = ax.imshow(np.rot90(WBP.reshape(self.y_length, self.x_length)), **kwargs)
+        fig.colorbar(im)
+        plt.title("Weighted Band Power")
+        return WBP
+
+    def plot_fit_curve(self, line):
+        fig, ax = plt.subplots()
+        plt.set_cmap('jet')
+        plt.plot(self.rs, exponential_decay(self.rs, self.coeffs[line][0], self.coeffs[line][1], self.coeffs[line][2]))
+        plt.scatter(self.rs, np.abs(self.velocities.T[line])**2)
+        plt.title(f'Decay function of spectral line number {line}')
 
 
 def mac(modeset1, modeset2, title: str = None):
@@ -390,3 +453,29 @@ def slide_grid_and_calculate_mac(modeset1: np.array, modeset2: np.array, directi
         return mac(
             np.abs(modeset1_slided.reshape((shape1[0], shape1[1] * shape1[2]))),
             np.abs(modeset2_slided.reshape((shape2[0], shape2[1] * shape2[2]))), title=title)
+
+
+def exponential_decay(x: float or np.array, a: float, b: float, c: float) -> float:
+    """
+    Calculates the exponential decay for the given x and coefficients.
+    :param x: variable.
+    :param a: coefficient a.
+    :param b: coefficient b.
+    :param c: coefficient c.
+    :return: the value of function for the given set of values.
+    """
+    return a * np.exp(-b * x) + c
+
+
+def biexponential_decay(x: float or np.array, a1: float, b1: float, c: float, a2: float, b2: float) -> float:
+    """
+    Calculates the biexponential decay for the given x and coefficients.
+    :param x: variable.
+    :param a1: coefficient a1.
+    :param b1: coefficient b1.
+    :param c: coefficient c.
+    :param a2: coefficient a2.
+    :param b2: coefficient b2.
+    :return: the value of function for the given set of values.
+    """
+    return a1 * np.exp(-b1 * x) + c + a2 *np.exp(-b2 * x)
