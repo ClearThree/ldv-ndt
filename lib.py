@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 
 class Experiment:
-    def __init__(self, raw_file, modeset_file, geometry=None):
+    def __init__(self, raw_file, modeset_file=None, geometry=None):
         """
         Initialization of Experiment instance. Takes the data of LDV experiment and modal data of this experiment.
         Experiment should be performed with equidistant regular rectangular grid of measuring points.
@@ -16,10 +16,9 @@ class Experiment:
         :param modeset_file: str,  Path to Simcenter Testlab .unv mode shape file.
         :param geometry: tuple of ints, dimensions of the experimental grid (optional).
         """
-        print('Reading experimental and mode set files...')
+        print('Reading experimental file...')
         self.raw_data_file: pyuff.UFF = pyuff.UFF(raw_file)
-        self.mode_shapes_file: pyuff.UFF = pyuff.UFF(modeset_file)
-        print('Files have been read.')
+        print('Experimental file has been read.')
         self.raw_data: np.array = None
         self.velocities: np.array = None
         self.exp_freqs: list = []
@@ -31,16 +30,20 @@ class Experiment:
         self.rs: np.array = None
         self.x_length: int = 0
         self.y_length: int = 0
-        self.extract_data_blocks()
-        self.extract_eigenfreqs()
-        self.coeffs: np.array = None
-        self.WDs: np.array = None
-        self.WBP: np.array = None
         if geometry:
             self.extract_geometry(geometry)
         else:
             self.extract_geometry()
-        self.construct_mode_shapes()
+        self.extract_data_blocks()
+        if modeset_file:
+            print('Reading modeset file...')
+            self.mode_shapes_file: pyuff.UFF = pyuff.UFF(modeset_file)
+            print('Experimental file has been read.')
+            self.extract_eigenfreqs()
+            self.construct_mode_shapes()
+        self.coeffs: np.array = None
+        self.WDs: np.array = None
+        self.WBP: np.array = None
         print("Experimental data processed successfully.")
 
     def extract_data_blocks(self):
@@ -61,7 +64,10 @@ class Experiment:
         df = pd.DataFrame(data)
         self.exp_freqs = data[0]['x']
         self.raw_data = np.stack(df[df['id1'] == 'Transfer Function H1']['data'].to_numpy())
-        self.velocities = np.stack(df[df['id1'] == 'Response Linear Spectrum']['data'].to_numpy())
+        try:
+            self.velocities = np.stack(df[df['id1'] == 'Response Linear Spectrum']['data'].to_numpy())
+        except ValueError:
+            self.velocities = None
 
     def extract_eigenfreqs(self):
         """
@@ -70,6 +76,8 @@ class Experiment:
         """
         print('Extracting mode shapes data...')
         indices = []
+        if not self.mode_shapes_file:
+            raise AttributeError("Modeset file was not specified for this experiment")
         set_types = self.mode_shapes_file.get_set_types()
         pbar = tqdm(total=len(set_types))
         for i, each in enumerate(set_types):
@@ -89,6 +97,14 @@ class Experiment:
                 eigenfreqs.append(float(test))
         self.eigenfreqs = eigenfreqs
 
+    def set_modeset_file(self, modeset_file: str):
+        """
+        Sets the mode shapes file for the experiment.
+        :param modeset_file: str, path to modeset.unv file.
+        :return: None.
+        """
+        self.mode_shapes_file: pyuff.UFF = pyuff.UFF(modeset_file)
+
     def extract_geometry(self, geometry: tuple = None) -> tuple:
         """
         Extracts (tries to) dimensions of experimental grid from raw .uff file.
@@ -99,7 +115,7 @@ class Experiment:
             self.x_length = geometry[0]
             self.y_length = geometry[1]
             return self.x_length, self.y_length
-        data = self.mode_shapes_file.read_sets(2)
+        data = self.raw_data_file.read_sets(2)
         self.xs = data['x']
         self.ys = data['y']
         i = 0
@@ -388,17 +404,19 @@ def mac(modeset1, modeset2, title: str = None):
     return res
 
 
-def complex_mac(modeset1: np.array, modeset2: np.array, region: list = None, title: str = None) -> np.array:
+def complex_mac(modeset1: np.array, modeset2: np.array, region: tuple = None, title: str = None) -> np.array:
     """
     Calculates MAC matrix for the given sets of complex modal vectors. Applicable only for complex values.
     :param modeset1: 2D numpy array of floats, set of modal vectors of the first experiment, rows are modal vectors.
     :param modeset2: 2D numpy array of floats, set of modal vectors of the first experiment, rows are modal vectors.
-    :param region: list, a list of tuples (coordinates of the rectangle for which the MAC is performed)
+    :param region: tuple, a tuple of tuples (coordinates of the rectangle's diagonal for which the MAC is performed)
     :param title: str, title for plot with MAC.
     :return: 2D numpy array of floats, MAC matrix.
     """
     if isinstance(modeset1[0][0], np.float32) or isinstance(modeset2[0][0], np.float32):
         raise ValueError('One of modesets is not complex. Use function mac instead!')
+    if region is not None and (modeset1.ndim != 3 or modeset2.ndim != 3):
+        raise ValueError('The given modesets are not 3-dims. Regional MAC requires 3D stacking of modeshapes.')
     if modeset1.shape[0] > modeset2.shape[0]:
         shape = modeset2.shape[0]
     else:
@@ -406,15 +424,30 @@ def complex_mac(modeset1: np.array, modeset2: np.array, region: list = None, tit
     res = np.zeros((shape, shape))
     for i in range(shape):
         for j in range(shape):
-            res[i][j] = (np.abs(np.vdot(modeset2[j], modeset1[i].T)) ** 2) / np.real(
-                np.vdot(modeset1[i].T, modeset1[i]) * np.vdot(modeset2[j].T, modeset2[j]))
-    fig, ax = plt.subplots()
-    plt.set_cmap('jet')
-    im = ax.imshow(res)
-    plt.colorbar(im)
-    plt.gca().invert_yaxis()
-    if title:
-        plt.title(title)
+            if region:
+                res[i][j] = (np.abs(np.vdot(modeset2[j, region[0][1]:region[1][1], region[0][0]:region[1][0]].
+                                            reshape(-1),
+                                            modeset1[i, region[0][1]:region[1][1], region[0][0]:region[1][0]].
+                                            reshape(-1).T)) ** 2) / np.real(
+                    np.vdot(modeset1[i, region[0][1]:region[1][1], region[0][0]:region[1][0]].reshape(-1).T,
+                            modeset1[i, region[0][1]:region[1][1], region[0][0]:region[1][0]].reshape(-1)) *
+                    np.vdot(modeset2[j, region[0][1]:region[1][1], region[0][0]:region[1][0]].reshape(-1).T,
+                            modeset2[j, region[0][1]:region[1][1], region[0][0]:region[1][0]].reshape(-1)))
+            elif modeset1.ndim == 2 and modeset2.ndim == 2:
+                res[i][j] = (np.abs(np.vdot(modeset2[j], modeset1[i].T)) ** 2) / np.real(
+                    np.vdot(modeset1[i].T, modeset1[i]) * np.vdot(modeset2[j].T, modeset2[j]))
+            else:
+                res[i][j] = (np.abs(np.vdot(modeset2[j].reshape(-1), modeset1[i].reshape(-1).T)) ** 2) / np.real(
+                    np.vdot(modeset1[i].reshape(-1).T, modeset1[i].reshape(-1)) * np.vdot(modeset2[j].reshape(-1).T,
+                                                                                          modeset2[j].reshape(-1)))
+    if not region:
+        fig, ax = plt.subplots()
+        plt.set_cmap('jet')
+        im = ax.imshow(res)
+        plt.colorbar(im)
+        plt.gca().invert_yaxis()
+        if title:
+            plt.title(title)
     return res
 
 
@@ -453,6 +486,31 @@ def slide_grid_and_calculate_mac(modeset1: np.array, modeset2: np.array, directi
         return mac(
             np.abs(modeset1_slided.reshape((shape1[0], shape1[1] * shape1[2]))),
             np.abs(modeset2_slided.reshape((shape2[0], shape2[1] * shape2[2]))), title=title)
+
+
+def sliding_mac_procedure(modeset1: np.array,  modeset2: np.array, window: tuple) -> None:
+    macs = np.empty((0, min(modeset1.shape[0], modeset2.shape[0]), min(modeset1.shape[0], modeset2.shape[0])))
+    window_height = window[1]
+    y_steps = int(modeset1.shape[1]/window_height)
+    window_width = window[0]
+    x_steps = int(modeset1.shape[2]/window_width)
+    for y in range(y_steps-1):
+        for x in range(x_steps-1):
+            mac = complex_mac(modeset1, modeset2, region=((window_width*x, window_height*y),
+                                                          (window_width*(x+1), window_height*(y+1))))
+            macs = np.append(macs, [mac], axis=0)
+    fig, axs = plt.subplots(x_steps-1, y_steps-1)
+    plt.set_cmap('jet')
+    for m in range(y_steps-1):
+        for n in range(x_steps-1):
+            print(m, n, m*(x_steps-1)+n)
+            if isinstance(axs, np.ndarray):
+                im = axs[n][m].imshow(macs[m*(x_steps-1)+n])
+                axs[n][m].invert_yaxis()
+                axs[n][m].axis('off')
+            else:
+                im = axs.imshow(macs[0])
+                axs.invert_yaxis()
 
 
 def exponential_decay(x: float or np.array, a: float, b: float, c: float) -> float:
