@@ -151,9 +151,10 @@ class Experiment:
                 modeshape = np.append(modeshape, point[index])
             modeshape = modeshape.reshape(self.y_length, self.x_length)
             modeshapes[int(np.around(self.exp_freqs[index]))] = modeshape
+        print('Mode shapes constructed.')
         self.mode_shapes = modeshapes
 
-    def stack_modeshapes(self, dims: int = 2, flip: bool = False) -> np.array:
+    def stack_mode_shapes(self, dims: int = 2, flip: bool = False) -> np.array:
         """
         Stacks mode shapes into one 2D-array or 3D-array.
         :param dims: int, specifies the dimensions for output array. Another words, specifies if the mode shapes should
@@ -177,7 +178,7 @@ class Experiment:
                                               np.flip(value, axis=1)], axis=0)
         return modeset
 
-    def visualize_modeshape(self, frequency: int, **kwargs):
+    def visualize_mode_shape(self, frequency: int, **kwargs):
         """
         Visualizes mode shape, either specified with frequency, or with number.
         :param frequency: int, frequency or number of mode (if the given number is less than 150, it will be interpreted
@@ -286,7 +287,7 @@ class Experiment:
     def associate_frequencies(self):
         """
         Associates the eigenfrequencies with the closest experimental frequency.
-        :return: Indices of experimental frequencies that are associated with the mode shapes.
+        :return: Indices of experimental frequencies that are associated with mode shapes.
         """
         eigenfreqs_indices = np.empty(0, dtype=np.int32)
         for each in self.eigenfreqs:
@@ -428,17 +429,17 @@ def complex_mac(modeset1: np.array, modeset2: np.array, region: tuple = None, ti
                 res[i][j] = (np.abs(np.vdot(modeset2[j, region[0][1]:region[1][1], region[0][0]:region[1][0]].
                                             reshape(-1),
                                             modeset1[i, region[0][1]:region[1][1], region[0][0]:region[1][0]].
-                                            reshape(-1).T)) ** 2) / np.real(
-                    np.vdot(modeset1[i, region[0][1]:region[1][1], region[0][0]:region[1][0]].reshape(-1).T,
+                                            reshape(-1))) ** 2) / np.real(
+                    np.vdot(modeset1[i, region[0][1]:region[1][1], region[0][0]:region[1][0]].reshape(-1),
                             modeset1[i, region[0][1]:region[1][1], region[0][0]:region[1][0]].reshape(-1)) *
-                    np.vdot(modeset2[j, region[0][1]:region[1][1], region[0][0]:region[1][0]].reshape(-1).T,
+                    np.vdot(modeset2[j, region[0][1]:region[1][1], region[0][0]:region[1][0]].reshape(-1),
                             modeset2[j, region[0][1]:region[1][1], region[0][0]:region[1][0]].reshape(-1)))
             elif modeset1.ndim == 2 and modeset2.ndim == 2:
                 res[i][j] = (np.abs(np.vdot(modeset2[j], modeset1[i].T)) ** 2) / np.real(
-                    np.vdot(modeset1[i].T, modeset1[i]) * np.vdot(modeset2[j].T, modeset2[j]))
+                    np.vdot(modeset1[i], modeset1[i]) * np.vdot(modeset2[j], modeset2[j]))
             else:
-                res[i][j] = (np.abs(np.vdot(modeset2[j].reshape(-1), modeset1[i].reshape(-1).T)) ** 2) / np.real(
-                    np.vdot(modeset1[i].reshape(-1).T, modeset1[i].reshape(-1)) * np.vdot(modeset2[j].reshape(-1).T,
+                res[i][j] = (np.abs(np.vdot(modeset2[j].reshape(-1), modeset1[i].reshape(-1))) ** 2) / np.real(
+                    np.vdot(modeset1[i].reshape(-1), modeset1[i].reshape(-1)) * np.vdot(modeset2[j].reshape(-1),
                                                                                           modeset2[j].reshape(-1)))
     if not region:
         fig, ax = plt.subplots()
