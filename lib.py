@@ -154,12 +154,14 @@ class Experiment:
         print('Mode shapes constructed.')
         self.mode_shapes = modeshapes
 
-    def stack_mode_shapes(self, dims: int = 2, flip: bool = False) -> np.array:
+    def stack_mode_shapes(self, dims: int = 2, flip: bool = False, dtype: str = '') -> np.array:
         """
         Stacks mode shapes into one 2D-array or 3D-array.
         :param dims: int, specifies the dimensions for output array. Another words, specifies if the mode shapes should
         be represented as vector or as matrix.
         :param flip: bool, specifies if the mode shapes should be flipped along the horizontal axis.
+        :param dtype: str, options: empty str '' - complex value of FRF will be stacked, 'amplitude' - only amplitudes will be
+         stacked, 'phase' - only phases will be stacked.
         :return: np.array, 2D or 3D-array with mode shapes, where mode shapes are along axis 0 either as vector or as
         matrix.
         """
@@ -171,11 +173,25 @@ class Experiment:
             raise ValueError('The given number of axes is not correct. Dims = 2 (with flattened modal vectors) or '
                              'dims = 3 (with modal shapes of experimental grid dimensions) should be used.')
         for key, value in self.mode_shapes.items():
-            if not flip:
-                modeset = np.append(modeset, [value.reshape(-1) if dims == 2 else value], axis=0)
-            else:
-                modeset = np.append(modeset, [np.flip(value, axis=1).reshape(-1) if dims == 2 else
-                                              np.flip(value, axis=1)], axis=0)
+            if dtype == 'amplitude':
+                if not flip:
+                    modeset = np.append(modeset, [np.abs(value).reshape(-1) if dims == 2 else np.abs(value)], axis=0)
+                else:
+                    modeset = np.append(modeset, [np.flip(np.abs(value), axis=1).reshape(-1) if dims == 2 else
+                                                  np.flip(np.abs(value), axis=1)], axis=0)
+            elif dtype == 'phase':
+                if not flip:
+                    modeset = np.append(modeset, [convert_to_phase(value).reshape(-1) if dims == 2 else
+                                                  convert_to_phase(value)], axis=0)
+                else:
+                    modeset = np.append(modeset, [np.flip(convert_to_phase(value), axis=1).reshape(-1) if dims == 2 else
+                                                  np.flip(convert_to_phase(value), axis=1)], axis=0)
+            elif dtype == '':
+                if not flip:
+                    modeset = np.append(modeset, [value.reshape(-1) if dims == 2 else value], axis=0)
+                else:
+                    modeset = np.append(modeset, [np.flip(value, axis=1).reshape(-1) if dims == 2 else
+                                                  np.flip(value, axis=1)], axis=0)
         return modeset
 
     def visualize_mode_shape(self, frequency: int, **kwargs):
@@ -198,7 +214,6 @@ class Experiment:
                 plt.title(f'Modeshape at frequency {freq} Hz')
             else:
                 try:
-
                     im = ax.imshow(np.rot90(np.abs(self.mode_shapes[each])), **kwargs)
                     fig.colorbar(im)
                     plt.title(f'Modeshape at frequency {each} Hz')
@@ -393,8 +408,8 @@ def mac(modeset1, modeset2, title: str = None):
     res = np.zeros((shape, shape))
     for i in range(shape):
         for j in range(shape):
-            res[i][j] = (np.abs(np.dot(modeset1[i].T, modeset2[j])) ** 2) / \
-                        (np.dot(modeset1[i].T, modeset1[i]) * np.dot(modeset2[j].T, modeset2[j]))
+            res[i][j] = (np.abs(np.dot(modeset1[i].T, modeset2[j])) ** 2) \
+                        / (np.dot(modeset1[i].T, modeset1[i]) * np.dot(modeset2[j].T, modeset2[j]))
     fig, ax = plt.subplots()
     plt.set_cmap('jet')
     im = ax.imshow(res, vmin=0, vmax=1)
@@ -444,7 +459,7 @@ def complex_mac(modeset1: np.array, modeset2: np.array, region: tuple = None, ti
     if not region:
         fig, ax = plt.subplots()
         plt.set_cmap('jet')
-        im = ax.imshow(res)
+        im = ax.imshow(res, vmin=0, vmax=1)
         plt.colorbar(im)
         plt.gca().invert_yaxis()
         if title:
@@ -512,6 +527,16 @@ def sliding_mac_procedure(modeset1: np.array,  modeset2: np.array, window: tuple
             else:
                 im = axs.imshow(macs[0])
                 axs.invert_yaxis()
+
+
+def convert_to_phase(values: np.array) -> np.array:
+    """
+    Takes the array of FRF values and extracts phase from each element.
+    :param values: np.array with complex values of FRF.
+    :return: np.array, an array of :values: shape where each element is phase in angles.
+    """
+    phases = np.arctan2(np.imag(values), np.real(values))
+    return phases * 180 / np.pi
 
 
 def exponential_decay(x: float or np.array, a: float, b: float, c: float) -> float:
